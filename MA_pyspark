@@ -1,0 +1,553 @@
+#!/usr/anaconda/bin/python
+# -*- coding: utf-8 -*-
+'''
+
+Description : This script is designed to calculate the peak current value for simulated values of 1 Die to (2/4/8) die
+The script first creates the delay file> calculated the moving average for corresponding microSecond
+# converting the working one to pyspark
+# Syntax : spark-submit --master yarn --executor-memory 21G --executor-cores 4 --driver-cores 3 --driver-memory 2G --conf spark.yarn.executor.memoryOverhead=3000 /home/kshanbhag/datahighway/ICCCharacteristics/Python/iccmovingavgV8.py ICC/US/INPUT/20170530/ICC_MLC_PROG/CSV spark
+# for debug mode uncomment debugmode = 0
+'''
+import os,re,argparse,inspect
+import itertools
+import numpy as np
+import logging
+import pandas as pd
+import traceback,sys
+import time,glob,shutil
+import numpy as np
+import sys,os
+from datetime import datetime
+from debugicc import debug1
+#from scipy import signal
+from logging.handlers import RotatingFileHandler
+cmd_path = os.path.realpath(os.path.abspath(os.path.split(inspect.getfile( inspect.currentframe() ))[0]))
+## this is to get path for common directory, assuming code is under datahighway
+filePath = os.path.realpath(__file__)
+rootDir = filePath[0: filePath.find('datahighway')]
+common_path = os.path.realpath( os.path.join(rootDir,'datahighway/COMMON/python'))
+## insert the paths
+if cmd_path not in sys.path:
+        sys.path.insert(1, cmd_path)
+if common_path not in sys.path:
+        sys.path.insert(1,common_path)
+
+def s3connection(access_key,secret_key,bucket_name):
+        try:
+                import boto
+                import boto.s3.connection
+                conn = boto.connect_s3(
+                aws_access_key_id = access_key,
+                aws_secret_access_key = secret_key,
+                port=80,
+                host = 'hgdlake',
+                is_secure=False,
+                calling_format = boto.s3.connection.OrdinaryCallingFormat(),
+                )
+                b=conn.get_bucket(bucket_name)
+                return b
+        except:
+                s = traceback.format_exc()
+                logStr = "s3 donwload error : error\n> stderr:\n%s\n" %s
+                print logStr
+                raise
+def readS3Keys(b,keyDir,debugMode):
+        rs=b.list(keyDir)
+        generatorFlag = 0
+        fileNames = []
+        #dict_filename ={}
+        keyCnt=0
+        for kk in rs:
+                generatorFlag = 1 # The list indeed returned something
+                if keyCnt == 2 and int(debugMode) == 0:
+                        break
+                key = kk.name
+                key = b.get_key(key)
+                # Skip X2 files
+                if not "pp_program_MLC_B2_X2" in kk.name:
+                        #dict_filename[keyCnt]=key
+			fileNames.append(key)
+                        keyCnt+=1
+        #return dict_filename
+	return fileNames
+def readCSVFile(fContent):
+	return np.array(fContent.replace("[","").replace("]","").decode('unicode_escape').encode('ascii','ignore').replace(","," ").split()).astype(float)
+def readS3File(key):
+	#return np.array(key.get_contents_as_string().splitlines()).astype(float)
+	#data=np.array()
+	#data.append(float(ln[2])
+        #data.append((re.split("(.*)\s+(.*)",line.strip()))[2]) for line in key.get_contents_as_string().splitlines()
+	data=[line.strip().split()[1] for line in key.get_contents_as_string().splitlines()]
+
+        return np.array(data).astype(float)
+
+def addTwoNumpyArray(a,b):
+	return np.add(a,b).tolist()
+def readFile(key):
+        #       return {1:[1,2,3]}
+        return np.array(open(key).read().strip().splitlines()).astype(float)
+
+def createComboOfData(combinationsize,samplesize,fContent):
+        data = []
+        #ll =[p for p in itertools.product(x, repeat=2)] permutation
+        #for subset in itertools.combinations(fContent, combinationsize):
+        for subset in itertools.product(fContent,repeat=2):
+                data.append(subset)
+                if len(data) == samplesize:
+                        break
+        return data
+
+def mvgC(ll,N):
+	#import pandas as pd
+	return map(lambda nn : np.amax(np.convolve(ll, np.ones((nn,))/nn)[(nn-1):]).tolist(),N)
+        #PD= pd.Series(ll)
+        #return map(lambda k: pd.rolling_mean(PD, k).dropna().max(),N)
+def adjustDelay(a,b):
+        #return (a,b)
+        return [a[len(a)-len(b):],b] if len(a) > len(b) else [a,b[len(b)-len(a):]]
+
+def exec_command(command):
+        """
+        Execute the command and return the exit status. this will make program to wait
+        """
+        exit_code = 1
+        stdo = ''
+        stde = ''
+        from subprocess import Popen, PIPE
+        try:
+                pobj = Popen(command, stdout=PIPE, stderr=PIPE, shell=True)
+                #pobj.wait()
+                stdo, stde = pobj.communicate()
+                exit_code = pobj.returncode
+        except:
+                print "Unexpected error at exec_command:", sys.exc_info()
+                import platform
+                s = traceback.format_exc()
+                logStr = " exec command  error : error\n> stderr:\n%s\n" %s
+                error = platform.node()+"-"+logStr
+                return (1,error,"")
+        return (exit_code, stdo, stde)
+def hdfsCSVUpload(strFh,loc):
+        command = "hdfs dfs -put -f "+strFh+".csv "+loc
+        print "command ",command
+        a,b,c = exec_command(command)
+        printHDFSResult(a,b,c)
+def hdfsJPEGUpload(strFh,loc):
+        command = "hdfs dfs -put -f "+strFh+".jpeg "+loc
+	print " command hdfs ",command
+        a,b,c = exec_command(command)
+        printHDFSResult(a,b,c)
+def printHDFSResult(a,b,c):
+
+        if b!="":
+                logging.info('stdout: %s' %b)
+        if c!= "":
+                logging.info('stderr: %s' %c)
+
+
+def cartesianNM(arrays, out=None):
+    '''
+    Generate a cartesian product of input arrays.
+    Parameters
+    ----------
+    arrays : list of array-like
+        1-D arrays to form the cartesian product of.
+    out : ndarray
+        Array to place the cartesian product in.
+    Returns
+    -------
+    out : ndarray
+        2-D array of shape (M, len(arrays)) containing cartesian products
+        formed of input arrays.
+    Examples
+    --------
+    >>> cartesian(([1, 2, 3], [4, 5], [6, 7]))
+    array([[1, 4, 6],
+           [1, 4, 7],
+           [1, 5, 6],
+           [1, 5, 7],
+           [2, 4, 6],
+           [2, 4, 7],
+           [2, 5, 6],
+           [2, 5, 7],
+           [3, 4, 6],
+           [3, 4, 7],
+           [3, 5, 6],
+           [3, 5, 7]])
+    '''
+
+    arrays = [np.asarray(x) for x in arrays]
+    dtype = arrays[0].dtype
+
+    n = np.prod([x.size for x in arrays])
+    if out is None:
+        out = np.zeros([n, len(arrays)], dtype=dtype)
+
+    m = n / arrays[0].size
+    #print " m size is ",m
+    #return m
+    out[:,0] = np.repeat(arrays[0], m)
+    if arrays[1:]:
+        cartesianNM(arrays[1:], out=out[0:m,1:])
+        for j in xrange(1, arrays[0].size):
+            out[j*m:(j+1)*m,1:] = out[0:m,1:]
+	    #if len(out) == 1:
+		#break
+    return out
+
+def main():
+
+        ###############
+        ## main code ##
+        ###############
+
+	#spark-submit --master yarn --executor-memory 12G --executor-cores 4 --driver-cores 3 --driver-memory 6G --packages com.databricks:spark-csv_2.11:1.2.0  --conf spark.yarn.executor.memoryOverhead=3000 iccmovingavgV1.py ICC/US/INPUT/20170530/ICC_MLC_PROG/CSV spark
+
+        #spark-submit --master yarn --executor-memory 12G --executor-cores 4 --driver-cores 3 --driver-memory 6G --conf spark.yarn.executor.memoryOverhead=3000 /home/kshanbhag/datahighway/ICCCharacteristics/Python/iccmovingavgV8.py ICC/US/INPUT/20170530/ICC_MLC_PROG/CSV spark
+        # spark-submit --master yarn --executor-memory 12G --executor-cores 4 --driver-cores 3 --driver-memory 6G --packages com.databricks:spark-csv_2.11:1.2.0,/usr/anaconda/pkgs/pandas-0.18.0-np110py27_0/lib/python2.7/site-packages/pandas --driver-class-path path_to_spark_application --conf spark.yarn.executor.memoryOverhead=3000 iccmovingavgV2_parquet.py ICC/US/INPUT/20170530/ICC_MLC_PROG/CSV spark
+
+	# spark-submit --master yarn --executor-memory 12G --executor-cores 4 --driver-cores 3 --driver-memory 6G iccmovingavgV3.py ICC/US/INPUT/20170530/ICC_MLC_PROG/CSV 
+
+	#cat /tmp/ICCMovingAvg/iccmovingavg.log | grep Duration
+        print "======================================="
+        parser = argparse.ArgumentParser(description='Program to calculate icc moving avergae',usage='example: time spark-submit --master yarn-client iccmovingavgV5.py ICC/US/INPUT/20170530/ICC_MLC_PROG/CSV spark/python --debugmode 0')
+        parser.add_argument('keyDir', help='')
+        #parser.add_argument('mode', help=' use this to either run as spark or python')
+        #parser.add_argument('-dt','--keyDate', help='')
+        parser.add_argument('-o','--outDir', help='')
+        parser.add_argument('-s','--samplesize' ,help='file Size to split')
+        parser.add_argument('-c','--combinationsize',help = 'no of combination size')
+        parser.add_argument('-m','--debugmode',help='used this to handle few lines and 2-3 files')
+        args = parser.parse_args()
+        global debugMode
+        global tmpFolder
+        global tmpRawData
+        if args.debugmode:
+                if args.debugmode == "1":
+                        debugMode = 1
+                else:
+                        debugMode = 0 # enabling making debug mode 
+        else:
+                debugMode = 1
+        #debugMode =0
+        if args.keyDir:
+                keyDir = args.keyDir
+        else:
+                keyDir = "ICC/US/"
+        if args.outDir:
+                args.outDir =""
+        else:
+                outDir ="/home/kshanbhag/ICC/results"
+        if args.samplesize:
+                samplesize = int(args.samplesize)
+        else:
+                samplesize = 1000000
+        if args.combinationsize:
+                combinationsize = int(args.combinationsize)
+	if debugMode == 0:
+		tmpRawData = "/home/kshanbhag/DieLevelRawData"
+		hdfsbasepath = "/user/kshanbhag/MovingAvg"
+	else:
+	        tmpRawData = "/tmp/ICCMovingAvg/DieLevelRawData"
+		hdfsbasepath = "/ICCCharacterisation/MovingAvg"
+	
+        tmpFolder = os.path.dirname(tmpRawData)
+	hdfsRawDataFolder= os.path.join(hdfsbasepath,"DieLevelRawData")
+        print " @@@ Creating tmp folder at %s @@@",tmpFolder
+        if not os.path.exists(tmpRawData):
+                os.makedirs(tmpRawData)
+        logFile = os.path.join(tmpFolder,"iccmovingavg.log")
+        logger = logging.getLogger("icclog")
+        logging.basicConfig(filename=logFile,level=logging.DEBUG,format='[%(asctime)-15s %(levelname)s] %(message)s',)
+        loggingByte=20000000
+        loggingBackupCount =500
+        handler = RotatingFileHandler(logFile, maxBytes=loggingByte,
+                                  backupCount=loggingBackupCount)
+        logger.addHandler(handler)
+        if int(debugMode) == 0:
+                stdoutHandler =logging.StreamHandler()
+                logger.addHandler(stdoutHandler)
+        logger.info(" Creating tmp folder at %s",tmpFolder)
+	cleanStarttime = datetime.now()
+
+
+        logger.info(">>>> CLEANUP STARTS <<<<")
+	'''
+        logger.info(" Remove all the tmp files from all the nodes")
+        command = "python /home/bdingstprd/datahighway/COMMON/python/monitornodes.py --command 'rm -r "+os.path.dirname(tmpRawData)+"/*'  --hostfile /home/bdingstprd/datahighway/DataIngestion/Config/hosts.txt"
+        #a,b,c = exec_command(command)
+        logger.info(" Finished cleaning all the nodes")
+	'''
+        logger.info(" Start cleaning hdfs directories for raw files")
+        command = "hdfs dfs -rm -r -skipTrash "+hdfsbasepath+"/*"
+        #a,b,c = exec_command(command)
+        logger.info(">>>> CLEANUP END <<<<")
+	cleanEndtime = datetime.now()
+	logger.info('Durationi cleanup: {}'.format(cleanEndtime - cleanStarttime))
+        sparkSubmitCmd = 'time spark-submit --master yarn-client '
+        # Define variable initialisation
+        newfContent = []
+        arry = []
+        arryF = []
+        cmbN =0
+        columns = ['DieType','Prob','1MicroSec','5MicroSec', '10MicroSec']
+        #Note: we could create an empty DataFrame (with NaNs) simply by writing:
+	print "debug Mode ",debugMode
+	if debugMode != 0:
+		# Read S3
+        	keyFile = open(os.path.join(common_path,'obj.key.txt'),'r')
+	        access_key = keyFile.readline().split('=')[1].strip()
+        	secret_key = keyFile.readline().split('=')[1].strip()
+	        keyFile.close()
+        	bucket_name = "test3-new-bucket"
+	        logger.info("Creating S3 connection")
+        	b = s3connection(access_key,secret_key,bucket_name)
+	        fileNames = readS3Keys(b,keyDir,debugMode)
+	else:
+		baseDir= "/home/kshanbhag/tmpkshanbhag/CodeNew/movingAvgRDD/"
+	        fileNames= [baseDir+"file1.csv",baseDir+"file2.csv",baseDir+"file3.csv",baseDir+"file4.csv"]
+	from pyspark import SparkContext, SparkConf
+
+	conf = (SparkConf()
+                    .set("spark.rdd.compress","true")
+                    .set("spark.storage.memoryFraction","1")
+                    .set("spark.core.connection.ack.wait.timeout","600")
+                    .set("spark.akka.frameSize","50")
+                    .set("spark.driver.maxResultSize", "3g")
+                    .set("spark.driver.extraJavaOptions","-Xms2048m -Xmx2048m")
+		    .set("spark.yarn.executor.memoryOverhead","3000")
+                    .set("spark.kryoserializer.buffer", '256'))
+	sc = SparkContext(conf=conf)
+	sc.setLogLevel('ERROR')
+	from pyspark.sql import HiveContext, SQLContext
+	from pyspark.sql.types import StructType,StructField,IntegerType,FloatType
+	sqlContext = SQLContext(sc)
+	logger.info(" No of Files to process - Single Die %s",len(fileNames))
+      	 
+	print " >>>> : Start process for 2 Die <<<< "
+	dieLevel = "2Die"
+	Die2Starttime = datetime.now()
+	rdd = sc.parallelize(fileNames)
+	if debugMode != 0:
+		rdd1 = rdd.map(lambda x : readS3File(x))
+	else:
+		rdd1 = rdd.map(lambda x : readFile(x))
+	#logger.info(rdd1.take(1))
+	rdd2=rdd1.cartesian(rdd1)	
+	#rdd2.cache()	
+	#logger.info("Count of combo %s",rdd2.count())
+	rdd3 = rdd2.map(lambda dd: adjustDelay(dd[0],dd[1]))
+	
+	rdd4=rdd3.map(lambda cc: addTwoNumpyArray(cc[0],cc[1]))
+	rdd4.cache()
+	#print rdd4.count()
+	#rdd4.cache()
+	#logger.info("adjust delay is %s",rdd3.take(1))
+	### Debug
+	#debug1(rdd3) 
+	#logger.info(rdd4.take(1))
+        #df.write.mode(saveMode.Overwrite).parquet("test.parquet")
+        #df.write.parquet("test.parquet")
+        #df.save("/ICCCharacterisation/MovingAvg/DieLevelRawData/2Die", source="parquet", mode='overwrite')
+
+
+	#df1=sqlContext.createDataFrame(rdd4.pivot())
+	
+	#df1.limit(1).write.format('com.databricks.spark.csv').save('mycsv.csv')
+	#.save("test_data", source="csv", mode='overwrite')
+	#rdd40= sc.parallelize(rdd4.take(2000))
+	#Die2SaveRawStime = datetime.now()
+	#logger.info(">>> Saving Raw Data >>>>")
+	#rdd40.coalesce(1).saveAsTextFile(os.path.join(hdfsRawDataFolder,'2Die.csv'))
+	#rdd4.coalesce(1).saveAsTextFile(os.path.join(hdfsRawDataFolder,'2Die.csv'))	
+	#Die2SaveRawEtime = datetime.now()
+	#logger.info('Duration 2Die Process: {}'.format(Die2SaveRawEtime - Die2SaveRawStime))
+	'''
+	command = "hdfs dfs -cat '"+os.path.join(hdfsRawDataFolder,'2Die.csv')+"' | shuf -n 2000 > "+tmpFolder+"/2Die.csv && hdfs dfs -put -f "+tmpFolder+"/2Die.csv "+os.path.join(hdfsRawDataFolder,'2DiePart1.csv')+" && rm "+tmpFolder+"/2Die.csv"
+	Die2ReRawStime = datetime.now()
+	#a,b,c = exec_command(command)
+        #df.save("test_data", source="parquet", mode='overwrite')
+	Die2ReRawEtime = datetime.now()
+	logger.info('Duration 2Die Process: {}'.format(Die2ReRawEtime - Die2SaveRawStime))
+	'''
+        # Read in the Parquet file created above.
+        # Parquet files are self-describing so the schema is preserved.
+        # The result of loading a parquet file is also a DataFrame.
+        #df2Die= sqlContext.read.parquet("/ICCCharacterisation/MovingAvg/MaxMovingAverage.parquet")
+	#rdd5= df2Die.rdd
+
+	#	
+
+	#N = (2,2,3)
+	N = (10,200,400)
+	rdd5= rdd4.map(lambda mvg:mvgC(mvg,N))
+	# resample for 4 die
+	#df=pd.DataFrame()
+	schema = StructType([StructField("1MicroSec",FloatType(),True),
+                     StructField("5MircroSec",FloatType(),True),
+                     StructField("10MircroSec",FloatType(),True)])
+
+	print " now converting rdd to df"
+	df2=sqlContext.createDataFrame(rdd5,schema)
+        #df2.write.mode(saveMode.Overwrite).parquet("/ICCCharacterisation/MovingAvg/.parquet")
+        #df2.write.mode(SaveMode.Overwrite).parquet(os.path.join(hdfsRawDataFolder,"MaxMovingAverage2Die"))
+	logger.info(" --- Saving the dataframe values to csv --- ")
+        df2.write.save(os.path.join(hdfsRawDataFolder,"MaxMovingAverage"+dieLevel+".parquet"), source="parquet", mode='overwrite')
+	'''
+	# Count Rows of parquet : 93636
+	mvgPD2Die=df2.toPandas()
+	# Redefine Const for this section
+        _strCommon = os.path.join(tmpFolder,'PeakCurrent_mvAvg'+'2Die_'+time.strftime("%d_%m_%y"))
+        #_constantList = (_1micronStep,_5micronStep,_10micronStep)
+        _hdfsHist = "histogram"
+        _hdfsCsv = "csv"
+        logger.info(" --- Plotting graphs (Histogram and saving to file/ upload to hdfs) ---" )
+        import matplotlib.pyplot as plt
+	#plt.style.use('ggplot')
+	fig, ax = plt.subplots()
+        mvgPD2Die.hist()
+	print "histogram file path",_strCommon
+        fig.savefig(_strCommon+'.jpeg')
+	if os.path.exists(_strCommon):
+		print "\n\n PASS\n\n"
+	
+        hst = os.path.join(hdfsbasepath,_hdfsHist)
+        cs = os.path.join(hdfsbasepath,_hdfsCsv)
+	print " >>> 2 DIE : Finally histogram and data of averages' max is stored in hdfs at location"+hdfsRawDataFolder+" <<<<"
+        logger.info(" >>> Uploading the histogram to HDFS at %s",hst)
+	print "before upload",_strCommon,hst
+        hdfsJPEGUpload(_strCommon,hst+"/"+os.path.basename(_strCommon+".jpeg"))
+        logger.info(" Cleanup %s directory for csv",tmpFolder)
+
+        for jpegPath in glob.iglob(os.path.join(tmpFolder, '*.jpeg')):
+                os.remove(jpegPath)
+	Delete this later
+	'''
+       	''' 
+	not working
+	# Quantile functions 
+	columns = ['DieType','Prob','1MicroSec','5MicroSec', '10MicroSec']
+        #Note: we could create an empty DataFrame (with NaNs) simply by writing:
+
+        df_ = pd.DataFrame(columns=columns)
+
+        vec = [1e-2, 4.63e-3, 2.15e-3, 1e-3,4.63e-4, 2.15e-4, 1e-4,4.63e-5, 2.15e-5, 1e-5,4.63e-6, 2.15e-6, 1e-6,4.63e-7, 2.15e-7, 1e-7]
+        # DieType','1MicroSec','5MicroSec', '10MicroSec
+        a = pd.Series(dieLevel)
+        df_= df_.assign(DieType=a.values)
+	print mvgPD2Die.quantile(vec)
+	
+        for v in vec:
+		#print np.percentile(mvgPD2Die.select("1MicroSec"), v)
+		b=mvgPD2Die.quantile(v)
+		
+                b = pd.Series(np.percentile(df2.select("1MicroSec"), v))
+                c = pd.Series(np.percentile(df2.select("5MicroSec"), v))
+                d = pd.Series(np.percentile(df2.select("10MicroSec"), v))
+                e = pd.Series(v)
+                df_= df_.assign(prob=e.values)
+		
+		
+                df_= df_.assign(1MicroSec=b.values)
+                df_= df_.assign(5MicroSec=c.values)
+                df_= df_.assign(10MicroSec=d.values)
+                
+                df3 = pd.DataFrame(data=[[dieLevel,v,quantile_1mcrn,quantile_5mcrn,quantile_10mcrn]],columns=['DieType','Prob','1MicroSec','5MicroSec', '10MicroSec'])
+	
+
+        # Redefine Const for this section
+
+	#print df_
+        _strdf = os.path.join(tmpFolder,'Prob_mvAvg'+dieLevel+time.strftime("%d_%m_%y"))
+        df3.to_csv(_strdf, sep='\t')
+        if os.path.exists(_strdf):
+                hdfsCSVUpload(_strdf,cs)
+                os.remove(_strdf)
+	'''	
+	Die2Endtime = datetime.now()
+        logger.info('Duration 2Die Process: {}'.format(Die2Endtime - Die2Starttime))
+	print "Start 4 Die"
+	stime = datetime.now()
+	sample=rdd4.take(2000)
+	rdd4.unpersist()
+	rdd6=sc.parallelize(sample)
+	etime = datetime.now()
+	print 'time for take approach: {}'.format(etime - stime)
+	'''
+	stime = datetime.now()
+	rdd6=rdd4.zipWithIndex().filter(lambda (key,index) : index <2000).toDF().drop("_2").rdd
+	
+	rdd4.unpersist()
+	etime = datetime.now()
+	print 'time for zipwith index approach {}'.format(etime - stime)
+	'''
+	#readCSVFile
+	Die4Starttime = datetime.now()	
+	dieLevel = "4Die"
+	rdd7=rdd6.cartesian(rdd6)
+	#print "combo is",rdd7.take(1)
+        rdd8 = rdd7.map(lambda dd: adjustDelay(dd[0],dd[1]))
+	#print rdd8.take(1)
+        rdd9=rdd8.map(lambda cc: addTwoNumpyArray(cc[0],cc[1]))
+	rdd9.cache()
+        #logger.info("adjust delay is %s",rdd9.take(1))
+	#rdd9.coalesce(1).saveAsTextFile(os.path.join(hdfsRawDataFolder,dieLevel+'.csv'))
+	N = (10,200,400)
+        rdd10= rdd9.map(lambda mvg:mvgC(mvg,N))
+        #df=pd.DataFrame()
+        df3=sqlContext.createDataFrame(rdd10)
+        #print df3.show()
+        #df2.write.mode(saveMode.Overwrite).parquet("/ICCCharacterisation/MovingAvg/.parquet")
+	df3.write.save(os.path.join(hdfsRawDataFolder,"MaxMovingAverage"+dieLevel+".parquet"), source="parquet", mode='overwrite')
+        #df3.write.parquet(os.path.join(hdfsbasepath,"MaxMovingAverage4Die"))
+	'''
+        #logger.info(" ###Saving all max value ###")
+        logger.info(" --- Saving the dataframe values to csv --- ")
+        #df2.save("/ICCCharacterisation/MovingAvg/DieLevelRawData/MaxMovingAverage", source="parquet", mode='overwrite')
+        #for gg in rdd4:
+        #       print "->",gg
+        # Redefine Const for this section
+        _strCommon = os.path.join(tmpFolder,'PeakCurrent_mvAvg'+dieLevel+'_'+time.strftime("%d_%m_%y"))
+
+	logger.info(" --- Plotting graphs (Histogram and saving to file/ upload to hdfs) ---" )
+        import matplotlib.pyplot as plt
+	df3.toPandas()
+	mvgPD4Die=df3.toPandas()
+        plt.style.use('ggplot')
+        print ">> plot starts << "
+	import matplotlib.pyplot as plt
+        #plt.style.use('ggplot')
+        fig, ax = plt.subplots()
+        mvgPD4Die.hist()
+        print "histogram file path",_strCommon
+        fig.savefig(_strCommon+'.jpeg')
+        if os.path.exists(_strCommon+'.jpeg'):
+                print "\n\n PASS\n\n"
+		hdfsJPEGUpload(_strCommon,hst+"/"+os.path.basename(_strCommon))
+	Die4Endtime = datetime.now()
+        logger.info('Duration 4Die Process: {}'.format(Die4Endtime - Die4Starttime))
+	plt.close()
+	'''
+	print  "cartesian count for 4 dies",rdd7.count()
+	rdd9.unpersist()
+
+if __name__ == "__main__":
+        start_time = datetime.now()
+
+        #print "Start Time : ",start_time
+        try:
+                main()
+                logger = logging.getLogger("icclog")
+        except:
+                s = traceback.format_exc()
+                serr = ">stderr:\n%s\n" %s
+                print serr
+        logger = logging.getLogger("icclog")
+        end_time = datetime.now()
+        print "Start Time : ",start_time
+        print "End Time : ",end_time
+        print('Duration: {}'.format(end_time - start_time))
+        logger.info("Start Time :%s ",start_time)
+        logger.info("End Time : %s",end_time)
+        logger.info('Duration: {}'.format(end_time - start_time))
+                                                                         
