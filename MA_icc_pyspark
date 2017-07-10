@@ -1,0 +1,520 @@
+# version1
+# -*- coding: utf-8 -*-
+'''
+Created on Mon May 29 2017
+
+
+Description : This script is designed to calculate the peak current value for simulated values of 1 Die to (2/4/8) die
+The script first creates the delay file> calculated the moving average for corresponding microSecond
+# converting the working one to pyspark
+# Syntax : spark-submit --master yarn --executor-memory 21G --executor-cores 4 --driver-cores 3 --driver-memory 2G --conf spark.yarn.executor.memoryOverhead=3000 /home/kshanbhag/datahighway/ICCCharacteristics/Python/iccmovingavgV8.py ICC/US/INPUT/20170530/ICC_MLC_PROG/CSV spark
+# for debug mode uncomment debugmode = 0
+'''
+import os,re,argparse,inspect
+import itertools
+import numpy as np
+import logging
+import traceback,sys
+import time,glob
+from logging.handlers import RotatingFileHandler
+cmd_path = os.path.realpath(os.path.abspath(os.path.split(inspect.getfile( inspect.currentframe() ))[0]))
+## this is to get path for common directory, assuming code is under datahighway
+filePath = os.path.realpath(__file__)
+rootDir = filePath[0: filePath.find('datahighway')]
+common_path = os.path.realpath( os.path.join(rootDir,'datahighway/COMMON/python'))
+## insert the paths
+if cmd_path not in sys.path:
+        sys.path.insert(1, cmd_path)
+if common_path not in sys.path:
+        sys.path.insert(1,common_path)
+from exec_command import exec_command
+class exceptionDoNothing(Exception):
+
+        #Used when the sys.exit() needs to be called but a user defined action needs to be performed.
+        #example: in case of avromerger, if the dbstatus shows the execution str is already in progress db status need not be updted but exit gracefully. 
+        pass
+	
+def s3connection(access_key,secret_key,bucket_name):
+	try:
+		import boto
+		import boto.s3.connection
+                conn = boto.connect_s3(
+                aws_access_key_id = access_key,
+                aws_secret_access_key = secret_key,
+                port=80,
+                host = 'hgdlake',
+                is_secure=False,
+                calling_format = boto.s3.connection.OrdinaryCallingFormat(),
+                )
+                b=conn.get_bucket(bucket_name)
+		return b
+	except:
+		s = traceback.format_exc()
+                logStr = "s3 donwload error : error\n> stderr:\n%s\n" %s
+                print logStr
+		raise 
+
+def readS3Keys(b,keyDir,debugMode):
+	rs=b.list(keyDir)
+	generatorFlag = 0
+	fileNames = []
+	dict_filename ={}
+	keyCnt=0
+	for kk in rs:
+        	generatorFlag = 1 # The list indeed returned something
+		if keyCnt == 4 and int(debugMode) == 0:
+	                break
+	        key = kk.name
+        	key = b.get_key(key)
+		# Skip X2 files
+		if not "pp_program_MLC_B2_X2" in kk.name:
+			dict_filename[keyCnt]=key
+			keyCnt+=1
+	return dict_filename
+
+def createComboOfData(combinationsize,samplesize,fContent):
+        data = []
+        for subset in itertools.combinations(fContent, combinationsize):
+        	data.append(subset)
+                if len(data) == samplesize:
+                	break
+        return data
+
+
+def processMVG1Die(key,debugMode,dieLevel,readType):
+	try:
+		# read from s3 
+		# caculate moving avg 
+		# calculate max 
+		# save file
+		# save to historgram
+		pass
+	except:
+                import platform
+                s = traceback.format_exc()
+                logStr = "s3 donwload error : error\n> stderr:\n%s\n" %s
+                error = platform.node()+"-"+logStr
+                return error
+        #return data # this is required to know which no
+        return mvg
+
+def processMVG(combo,dict_file,debugMode,dieLevel,readType):
+        try :
+		logger = logging.getLogger("icclog")
+		### S3 section Start 
+                logStr = ""
+		arry = []
+		N = (10,200,400)
+                import re
+		for f in combo:
+			### S3 section Start 
+			data=[]
+			maxFileCnt = 0
+			key = dict_file[f]
+			if readType == "s3":
+				# Read from S3
+	        	        arryLines = key.get_contents_as_string().splitlines()
+			else:
+				# Read from HDFS 
+				arryLines = map(float, readFromHDFS(key).split(","))
+				
+				return arryLines
+                	for line in arryLines:
+                        	ln= re.split("(.*)\s+(.*)",line.strip())
+	                        data.append(float(ln[2]))
+        	                maxFileCnt+=1
+                	        if maxFileCnt == 4 and int(debugMode) == 0:
+                        	        break
+			arry.append(data)
+			### S3 section End
+		### Delay adjustment Start
+        	if len(arry[0]) > len(arry[1]):
+                	logger.info("Turns out the first element is bigger than the second")
+	                splitL = len(arry[0])-len(arry[1])
+        	        newF = arry[0][splitL:]
+                	new2 = arry[1]
+	                newF.extend(new2)
+	        else:
+        	        print " WARNING : both the array may be equal; appending both the file together "
+                	splitL = len(arry[1])-len(arry[0])
+	                new1 = arry[0]
+        	        logger.info("Split Size is :%s",splitL)
+                	newF = arry[1][splitL:]
+	                newF.extend(new1)
+		#### Delay Adjustment End
+		### dump the array to file	
+		hdfsbase = "/ICCCharacterisation/MovingAvg/DieLevelRawData/"
+		newfilename = hdfsbase+dieLevel+"_"+str(combo[0])+str(combo[1])+".csv"
+		'''
+		hdfsReturn = writeToHDFS(newF,newfilename)
+		
+		if hdfsReturn != "":
+			return error
+		'''
+		### Calculate the moving average
+		mvg = map(lambda nn : np.amax(np.convolve(newF, np.ones((nn,))/nn)[(nn-1):]),N) 
+		### end Calculate the moving average
+        except:
+		import platform
+                s = traceback.format_exc()
+                logStr = "s3 donwload error : error\n> stderr:\n%s\n" %s
+                error = platform.node()+"-"+logStr
+		return error
+        #return data # this is required to know which no
+	return mvg
+def writeToHDFS(content,newfilename):
+        from subprocess import Popen, PIPE
+        #put = Popen(["hadoop", "fs", "-put","-f" ,"-", newfilename],
+        #    stdin=PIPE)
+	fContent = ','.join([str(x) for x in content])
+	fileName = os.path.join(tmpFolder,os.path.basename(newfilename))
+	fh = open(fileName,'w+')
+	fh.write(fContent)
+	command = "hdfs dfs -put -f "+fileName+" "+ os.path.dirname(newfilename)
+	a,b,c = exec_command(command)
+	return b
+        #put.stdin.write(fContent)
+        #put.stdin.close()
+        #put.wait()
+def readFromHDFS(filename):
+	from subprocess import Popen, PIPE
+        cat = Popen(["hadoop", "fs", "-cat", filename],stdout=PIPE)
+        cat.wait()
+        fh = cat.stdout.read().strip()
+        cat.stdout.close()
+        return fh
+def hdfsCSVUpload(strFh,loc):
+        command = "hdfs dfs -put "+strFh+".csv "+loc
+        a,b,c = exec_command(command)
+        printHDFSResult(a,b,c)
+def hdfsJPEGUpload(strFh,loc):
+        command = "hdfs dfs -put "+strFh+".jpeg "+loc
+        a,b,c = exec_command(command)
+        printHDFSResult(a,b,c)
+def printHDFSResult(a,b,c):
+
+        if b!="":
+                logging.info('stdout: %s' %b)
+        if c!= "":
+                logging.info('stderr: %s' %c)
+
+def empericaldistribution(maxArry):
+
+	proDist = ()
+
+def repeatSteps(sc,dict_filename,combinationsize,samplesize,dieLevel,readType):
+	# Define constants
+        _1micronStep = 20
+        _5micronStep = 100
+        _10micronStep = 400
+	logger = logging.getLogger("icclog")
+	lKeys = dict_filename.keys()
+        logger.info(" -- Creating combo of the file index --")
+        lCombo = createComboOfData(combinationsize,samplesize,lKeys)    
+        logger.info(" >> Combo length is :%s",len(lCombo))
+        rddCombo = sc.parallelize(lCombo)
+        rddMVAvg_ = rddCombo.map(lambda cc: processMVG(cc,dict_filename,debugMode,dieLevel,readType))
+        logger.info(" >> Final rdd count OR no of results of avgs max for %s is %s",dieLevel,rddMVAvg_.count())
+        rddMVAvg = rddMVAvg_.collect()
+	print rddMVAvg[1]
+        # Redefine Const for this section
+        _str2Die1mcrn = os.path.join(tmpFolder,'PeakCurrent_mvAvg'+dieLevel+'_1mcrn-'+time.strftime("%d_%m_%y"))
+        _str2Die5mcrn = os.path.join(tmpFolder,'PeakCurrent_mvAvg'+dieLevel+'_5mcrn-'+time.strftime("%d_%m_%y"))
+        _str2Die10mcrn = os.path.join(tmpFolder,'PeakCurrent_mvAvg'+dieLevel+'_10mcrn-'+time.strftime("%d_%m_%y"))      
+        _constantList = (_1micronStep,_5micronStep,_10micronStep) 
+        _hdfsBaseLoc ="/ICCCharacterisation/MovingAvg"
+        _hdfsHist = "histogram"
+        _hdfsCsv = "csv"
+
+        logger.info(" ###Collecting all max value ###")
+        #mvAvg2Die_1mcrn = []
+        #mvAvg2Die_5mcrn = []
+        #mvAvg2Die_10mcrn = []
+	'''
+        for cnt,mvgN in enumerate(rddMVAvg):
+                mvAvg2Die_1mcrn.append(rddMVAvg[cnt][0])
+                mvAvg2Die_5mcrn.append(rddMVAvg[cnt][1])
+                mvAvg2Die_10mcrn.append(rddMVAvg[cnt][2])
+        npmvAvg2Die_1mcrn = np.array(mvAvg2Die_1mcrn)
+	'''
+	print "...\n",rddMVAvg,"\n>>"
+	for cnt,mvgN in enumerate(rddMVAvg):
+		print "count is",cnt
+                if cnt == 0:
+                        print "first options",rddMVAvg[0]
+                        print "second options",rddMVAvg[cnt][0]
+                        mvAvg2Die_1mcrn = np.array(float(rddMVAvg[cnt][0]))
+			print " np now is ",mvAvg2Die_1mcrn.size,"\n",mvAvg2Die_1mcrn
+                        mvAvg2Die_5mcrn = np.array(float(rddMVAvg[cnt][1]))
+                        mvAvg2Die_10mcrn = np.array(float(rddMVAvg[cnt][2]))
+                else:
+			print "else second options",rddMVAvg[cnt][0]
+			print " np now is ",mvAvg2Die_1mcrn.size,"\n",mvAvg2Die_1mcrn
+
+                        #mvAvg2Die_1mcrn.append(mvAvg[cnt][0])
+                        #mvAvg2Die_5mcrn.append(mvAvg[cnt][1])
+                        #mvAvg2Die_10mcrn.append(mvAvg[cnt][2])
+			try:
+	                        mvAvg2Die_1mcrn = np.append(mvAvg2Die_1mcrn,float(rddMVAvg[cnt][0]))
+				#print "after concetenae",mvAvg2Die_1mcrn
+                	        mvAvg2Die_5mcrn = np.append(mvAvg2Die_5mcrn,float(rddMVAvg[cnt][1]))
+                        	mvAvg2Die_10mcrn = np.append(mvAvg2Die_10mcrn,float(rddMVAvg[cnt][2]))
+			except:
+				print "exception : rddMVAvg[cnt]",rddMVAvg[cnt]
+	#print "count of 1microsec np ", len(npmvAvg2Die_1mcrn)
+	#print " np values 1 micro",npmvAvg2Die_1mcrn
+	#print "count of 1microsec np ", len(npmvAvg2Die_1mcrn)
+	#print "type of the numpy is",npmvAvg2Die_1mcrn.dtype
+        #npmvAvg2Die_5mcrn = np.array(mvAvg2Die_5mcrn)
+        #npmvAvg2Die_10mcrn = np.array(mvAvg2Die_10mcrn)
+        logger.info(" --- Saving the dataframe values to csv --- ")
+        # using numpy
+	print " dumping data to csv" 
+        mvAvg2Die_1mcrn.tofile(_str2Die1mcrn+'.csv', sep=',')
+        mvAvg2Die_5mcrn.tofile(_str2Die5mcrn+'.csv', sep=',')
+        mvAvg2Die_10mcrn.tofile(_str2Die10mcrn+'.csv', sep=',')
+        logger.info(" --- Plotting graphs (Histogram and saving to file/ upload to hdfs) ---" )
+        import matplotlib.pyplot as plt
+        plt.style.use('ggplot')
+	print ">> plot starts - > ",mvAvg2Die_1mcrn[1]
+        plt.hist(mvAvg2Die_1mcrn)
+        plt.savefig(_str2Die1mcrn+'.jpeg')  
+        plt.hist(mvAvg2Die_5mcrn)
+        plt.savefig(_str2Die5mcrn+'.jpeg')
+        plt.hist(mvAvg2Die_10mcrn)
+        plt.savefig(_str2Die10mcrn+'.jpeg')
+
+        hst = os.path.join(_hdfsBaseLoc,_hdfsHist)      
+        cs = os.path.join(_hdfsBaseLoc,_hdfsCsv)
+
+        lExec = (_str2Die1mcrn,_str2Die5mcrn,_str2Die10mcrn)    
+        for strFh in lExec:
+                logger.info(" >>> Uploading the histogram to HDFS at %s",cs)
+                hdfsCSVUpload(strFh,cs)
+                logger.info(" >>> Uploading the histogram to HDFS at %s",hst)
+                hdfsJPEGUpload(strFh,hst)
+        logger.info(" Cleanup %s directory for csv",tmpFolder)
+        for csvPath in glob.iglob(os.path.join(tmpFolder, '*.csv')):
+                os.remove(csvPath)
+        for jpegPath in glob.iglob(os.path.join(tmpFolder, '*.jpeg')):
+                os.remove(jpegPath)
+
+	plt.close()
+
+def main():
+
+        ###############
+        ## main code ##
+        ###############
+        #spark-submit --master yarn --executor-memory 12G --executor-cores 4 --driver-cores 3 --driver-memory 6G --conf spark.yarn.executor.memoryOverhead=3000 /home/kshanbhag/datahighway/ICCCharacteristics/Python/iccmovingavgV8.py ICC/US/INPUT/20170530/ICC_MLC_PROG/CSV spark
+	print "======================================="
+        parser = argparse.ArgumentParser(description='Program to calculate icc moving avergae',usage='example: time spark-submit --master yarn-client iccmovingavgV5.py ICC/US/INPUT/20170530/ICC_MLC_PROG/CSV spark/python --debugmode 0')
+	parser.add_argument('keyDir', help='')
+	parser.add_argument('mode', help=' use this to either run as spark or python')
+	#parser.add_argument('-dt','--keyDate', help='')
+	parser.add_argument('-o','--outDir', help='')
+        parser.add_argument('-s','--samplesize' ,help='file Size to split')
+	parser.add_argument('-c','--combinationsize',help = 'no of combination size')
+	parser.add_argument('-m','--debugmode',help='used this to handle few lines and 2-3 files')
+        args = parser.parse_args()
+	global debugMode
+	global tmpFolder
+	if args.mode:
+		if args.mode == "pyspark":
+			mode = 1 # run as spark
+		else:
+			mode = 1 # run as local/ python 
+	if args.debugmode:
+		if args.debugmode == "1":
+			debugMode = 1
+		else:
+			debugMode = 0 # enabling making debug mode 
+	else:
+		debugMode = 1	
+	#debugMode =0
+	if args.keyDir:
+		keyDir = args.keyDir 
+	else:
+		keyDir = "ICC/US/"
+	'''
+	if args.keyDate:
+		keyDate = args.keyDate
+	else:
+		keyDate = "20170526"
+	'''
+	if args.outDir:
+		args.outDir =""
+	else:
+		outDir ="/home/kshanbhag/ICC/results"
+	if args.samplesize:
+		samplesize = int(args.samplesize)
+	else:
+		samplesize = 5000
+	if args.combinationsize:
+		combinationsize = int(args.combinationsize)
+	else:
+		combinationsize = 2
+
+		
+	tmpFolder = "/tmp/ICCMovingAvg"
+	print " @@@ Creating tmp folder at %s @@@",tmpFolder
+	if not os.path.exists(tmpFolder):
+                os.mkdir(tmpFolder)
+	logFile = os.path.join(tmpFolder,"iccmovingavg.log")
+        logger = logging.getLogger("icclog")
+        logging.basicConfig(filename=logFile,level=logging.DEBUG,format='[%(asctime)-15s %(levelname)s] %(message)s',)
+	loggingByte=20000000
+	loggingBackupCount =500
+	handler = RotatingFileHandler(logFile, maxBytes=loggingByte,
+                                  backupCount=loggingBackupCount)
+        logger.addHandler(handler)
+        if int(debugMode) == 0:
+        	stdoutHandler =logging.StreamHandler()
+                logger.addHandler(stdoutHandler)
+	logger.info(" Creating tmp folder at %s",tmpFolder)
+	'''
+	# Define constants
+	_1micronStep = 20
+	_5micronStep = 100
+	_10micronStep = 400
+	'''
+	sparkSubmitCmd = 'time spark-submit --master yarn-client '
+	# Define variable initialisation
+	newfContent = []
+	arry = []
+	arryF = []
+        cmbN =0	
+	hdfsbasepath = "/ICCCharacterisation/MovingAvg/DieLevelRawData/"
+	print " >>> Starting Spark Context "	
+	if mode == 1:
+		from pyspark import SparkContext, SparkConf
+		#print "..."
+		# add this with extraJavaOption
+		# -XX:+DisableExplicitGC -Dcom.sun.management.jmxremote -XX:PermSize=512m -XX:MaxPermSize=2048m -XX:MaxDirectMemorySize=5g
+		#conf = SparkConf().setAppName('ICCApp')
+		#sc = SparkContext(conf=conf)
+		
+    		conf = (SparkConf()
+	            .set("spark.rdd.compress","true")
+        	    .set("spark.storage.memoryFraction","1")
+	            .set("spark.core.connection.ack.wait.timeout","600")
+        	    .set("spark.akka.frameSize","50")
+		    .set("spark.driver.maxResultSize", "3g")
+		    .set("spark.driver.extraJavaOptions","-Xms2048m -Xmx2048m")
+	    	    .set("spark.kryoserializer.buffer", '256'))
+	    	sc = SparkContext(conf=conf)
+		sc.setLogLevel('ERROR')
+
+	# Read S3
+    	keyFile = open(os.path.join(common_path,'obj.key.txt'),'r')
+    	access_key = keyFile.readline().split('=')[1].strip()
+    	secret_key = keyFile.readline().split('=')[1].strip()
+    	keyFile.close()
+    	bucket_name = "test3-new-bucket"
+	logger.info("Creating S3 connection")
+	b = s3connection(access_key,secret_key,bucket_name)
+	#fileNames = readS3Keys(b,keyDir,debugMode)
+	print " >>>> : Start process for 2 Die <<<< "
+	#############################
+        # 2 Die
+        ############################# 
+	logger.info(" >>>> 2 DIE : Step 1: Reading s3 keys <<<<<")
+	dict_filename = readS3Keys(b,keyDir,debugMode)
+	print " Total files read from s3 is :",len(dict_filename.keys())
+
+	print " >>> 2 DIE : Starting process - >Step 2,3,4 (combined): Create Combo, Adjust the delay and calculate moving average + find the max of these averages <<<<"
+	repeatSteps(sc,dict_filename,combinationsize,samplesize,"2Die","s3")
+	print " >>> 2 DIE : Finally histogram and data of averages' max is stored in hdfs at location"+hdfsbasepath+" <<<<"
+	sys.exit()	
+	#############################
+	# 4 Die
+	#############################
+	print " >>>> Start process for 4 Die <<<< "	
+	hdfsbasepath = "/ICCCharacterisation/MovingAvg/DieLevelRawData/"
+	file2Die = "2Die*.csv"
+	command = "hdfs dfs -ls "+hdfsbasepath+file2Die
+	logger.info(" >>>> Step 1: Reading filenames from hdfs for 2 Dies to generate 4 Die data <<<<<")
+	a,b,c = exec_command(command)
+	if b != "" and c == "":
+		dict_filename={}
+		# dict((cnt, l[i+1]) if i+1 < len(l) else (l[i], '') for cnt,i in enumerate(xrange(len(l))))
+		dict_filename = dict((cnt,re.match(".*\s+(.*.csv)",files).group(1)) for cnt,files in enumerate(b.splitlines()) if "2Die" in files)
+		#print "lFileNames",lFiles
+	print " >>> 4DIE : Starting process - >Step 2,3,4 (combined): Create Combo, Adjust the delay and calculate moving average + find the max of these averages <<<<"
+	repeatSteps(sc,dict_filename,combinationsize,samplesize,"4Die","hdfs")			
+	print " >>> 4DIE : Finally histogram and data of averages' max is stored in hdfs at location"+hdfsbasepath+" <<<<"
+
+	#############################
+        # 8 Die
+        #############################  
+	print " >>>> Start process for 8 Die <<<< "        
+        hdfsbasepath = "/ICCCharacterisation/MovingAvg/DieLevelRawData/"
+        file4Die = "4Die*.csv"
+        command = "hdfs dfs -ls "+hdfsbasepath+file4Die
+	logger.info(" >>>> Step 1: Reading filenames from hdfs for 4 Dies to generate 8 Die data <<<<<")
+        a,b,c = exec_command(command)
+        if b != "" and c == "":
+                dict_filename={}
+                # dict((cnt, l[i+1]) if i+1 < len(l) else (l[i], '') for cnt,i in enumerate(xrange(len(l))))
+                dict_filename = dict((cnt,re.match(".*\s+(.*.csv)",files).group(1)) for cnt,files in enumerate(b.splitlines()) if "4Die" in files)
+                #print "lFileNames",lFiles
+	print " >>> 8DIE : Starting process - >Step 2,3,4 (combined): Create Combo, Adjust the delay and calculate moving average + find the max of these averages <<<<"
+        repeatSteps(sc,dict_filename,combinationsize,samplesize,"8Die","hdfs")
+	print " >>> 8DIE : Finally histogram and data of averages' max is stored in hdfs at location"+hdfsbasepath+" <<<<"
+
+	#############################
+        # 16 Die
+        #############################   
+	print " >>>> Start process for 16 Die <<<< "       
+        hdfsbasepath = "/ICCCharacterisation/MovingAvg/DieLevelRawData/"
+        file8Die = "8Die*.csv"
+        command = "hdfs dfs -ls "+hdfsbasepath+file8Die
+	logger.info(" >>>> Step 1: Reading filenames from hdfs for 8 Dies to generate 16 Die data <<<<<")
+        a,b,c = exec_command(command)
+        if b != "" and c == "":
+                dict_filename={}
+                # dict((cnt, l[i+1]) if i+1 < len(l) else (l[i], '') for cnt,i in enumerate(xrange(len(l))))
+                dict_filename = dict((cnt,re.match(".*\s+(.*.csv)",files).group(1)) for cnt,files in enumerate(b.splitlines()) if "8Die" in files)
+                #print "lFileNames",lFiles
+	print " >>> 16DIE : Starting process - >Step 2,3,4 (combined): Create Combo, Adjust the delay and calculate moving average + find the max of these averages <<<<"
+        repeatSteps(sc,dict_filename,combinationsize,samplesize,"16Die","hdfs")
+	print " >>> 16DIE : Finally histogram and data of averages' max is stored in hdfs at location"+hdfsbasepath+" <<<<"
+	
+	'''
+	Kirthi,
+Below is the two lines in R to generate the table of probabilities. The first line is just creating a vector of desired probabilities while the second line is creating dataframe with all the ICC values corresponding to the prob values. By the way you will need to look for quantiel function in Python and not the empirical CDF, since you are looking for the ICC values given the prob values. The table attached has the table I sent Ken. Please note that the table has all the results and not just the 1-Die files. The code below is modified accordingly to generate the 2, 4, 8 and 16 dies files.
+ 
+1.       prob <- c(1e-2, 4.63e-3, 2.15e-3, 1e-3,4.63e-4, 2.15e-4, 1e-4,4.63e-5, 2.15e-5, 1e-5,4.63e-6, 2.15e-6, 1e-6,4.63e-7, 2.15e-7, 1e-7 ) 
+2.       Die1 <-data.frame(Probability = prob, Mic1 = 1000*quantile(B2_1Die_1mic, probs = 1 - prob), Mic5 = 1000*quantile(B2_1Die_5mic, probs = 1 - prob), Mic20 = 1000*quantile(B2_1Die_20mic, probs = 1 - prob))
+ 
+Let me know if you have any questions.
+ 
+	'''
+
+	 # Empty all variables:
+        logger.info("Empty all the variable to handle the memory better")       
+        arry = [] # reusing the variable. but need to empty first
+        sc.stop()
+	
+if __name__ == "__main__":
+        from datetime import datetime
+        start_time = datetime.now()
+
+        #print "Start Time : ",start_time
+        try:
+                main()
+                logger = logging.getLogger("icclog")
+        except exceptionDoNothing:
+                pass
+        except:
+                s = traceback.format_exc()
+                serr = ">stderr:\n%s\n" %s
+                print serr
+	logger = logging.getLogger("icclog")
+        end_time = datetime.now()
+	print "Start Time : ",start_time
+        print "End Time : ",end_time
+        print('Duration: {}'.format(end_time - start_time))
+        logger.info("Start Time :%s ",start_time)
+        logger.info("End Time : %s",end_time)
+        logger.info('Duration: {}'.format(end_time - start_time))
