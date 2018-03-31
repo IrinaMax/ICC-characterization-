@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 '''
 
-Description : This script is a training durtywork, designed to calculate the peak current value for simulated values of 1 Die to (2/4/8) die
+Description : This script is a training example of research, designed to calculate the peak current value for simulated values of 1 Die to (2/4/8) die
 The script first creates the delay file> calculated the moving average for corresponding microSecond
 # converting the working R code to pyspark
 # Syntax : spark-submit --master yarn --executor-memory 21G --executor-cores 4 --driver-cores 3 --driver-memory 2G --conf spark.yarn.executor.memoryOverhead=3000 /home/**/Python/iccmovingavgV8.py ICC/**/CSV spark
