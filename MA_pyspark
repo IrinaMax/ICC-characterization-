@@ -5,7 +5,7 @@
 Description : This script is a training durtywork, designed to calculate the peak current value for simulated values of 1 Die to (2/4/8) die
 The script first creates the delay file> calculated the moving average for corresponding microSecond
 # converting the working R code to pyspark
-# Syntax : spark-submit --master yarn --executor-memory 21G --executor-cores 4 --driver-cores 3 --driver-memory 2G --conf spark.yarn.executor.memoryOverhead=3000 /home/kshanbhag/datahighway/ICCCharacteristics/Python/iccmovingavgV8.py ICC/US/INPUT/20170530/ICC_MLC_PROG/CSV spark
+# Syntax : spark-submit --master yarn --executor-memory 21G --executor-cores 4 --driver-cores 3 --driver-memory 2G --conf spark.yarn.executor.memoryOverhead=3000 /home/**/Python/iccmovingavgV8.py ICC/**/CSV spark
 # for debug mode uncomment debugmode = 0
 '''
 import os,re,argparse,inspect
@@ -24,8 +24,8 @@ from logging.handlers import RotatingFileHandler
 cmd_path = os.path.realpath(os.path.abspath(os.path.split(inspect.getfile( inspect.currentframe() ))[0]))
 ## this is to get path for common directory, assuming code is under datahighway
 filePath = os.path.realpath(__file__)
-rootDir = filePath[0: filePath.find('datahighway')]
-common_path = os.path.realpath( os.path.join(rootDir,'datahighway/COMMON/python'))
+rootDir = filePath[0: filePath.find('data**')]
+common_path = os.path.realpath( os.path.join(rootDir,'data**/COMMON/python'))
 ## insert the paths
 if cmd_path not in sys.path:
         sys.path.insert(1, cmd_path)
@@ -37,10 +37,10 @@ def s3connection(access_key,secret_key,bucket_name):
                 import boto
                 import boto.s3.connection
                 conn = boto.connect_s3(
-                aws_access_key_id = access_key,
-                aws_secret_access_key = secret_key,
+                aws_access_key_id = access_key*,
+                aws_secret_access_key = secret_key*,
                 port=80,
-                host = 'hgdlake',
+                host = '**lake',
                 is_secure=False,
                 calling_format = boto.s3.connection.OrdinaryCallingFormat(),
                 )
@@ -201,16 +201,16 @@ def main():
         ## main code ##
         ###############
 
-	#spark-submit --master yarn --executor-memory 12G --executor-cores 4 --driver-cores 3 --driver-memory 6G --packages com.databricks:spark-csv_2.11:1.2.0  --conf spark.yarn.executor.memoryOverhead=3000 iccmovingavgV1.py ICC/US/INPUT/20170530/ICC_MLC_PROG/CSV spark
+	#spark-submit --master yarn --executor-memory 12G --executor-cores 4 --driver-cores 3 --driver-memory 6G --packages com.databricks:spark-csv_2.11:1.2.0  --conf spark.yarn.executor.memoryOverhead=3000 iccmovingavgV1.py ICC/CSV spark
 
-        #spark-submit --master yarn --executor-memory 12G --executor-cores 4 --driver-cores 3 --driver-memory 6G --conf spark.yarn.executor.memoryOverhead=3000 /home/kshanbhag/datahighway/ICCCharacteristics/Python/iccmovingavgV8.py ICC/US/INPUT/20170530/ICC_MLC_PROG/CSV spark
-        # spark-submit --master yarn --executor-memory 12G --executor-cores 4 --driver-cores 3 --driver-memory 6G --packages com.databricks:spark-csv_2.11:1.2.0,/usr/anaconda/pkgs/pandas-0.18.0-np110py27_0/lib/python2.7/site-packages/pandas --driver-class-path path_to_spark_application --conf spark.yarn.executor.memoryOverhead=3000 iccmovingavgV2_parquet.py ICC/US/INPUT/20170530/ICC_MLC_PROG/CSV spark
+        #spark-submit --master yarn --executor-memory 12G --executor-cores 4 --driver-cores 3 --driver-memory 6G --conf spark.yarn.executor.memoryOverhead=3000 /home/Python/iccmovingavgV8.py ICC/CSV spark
+        # spark-submit --master yarn --executor-memory 12G --executor-cores 4 --driver-cores 3 --driver-memory 6G --packages com.databricks:spark-csv_2.11:1.2.0,/usr/anaconda/pkgs/pandas-0.18.0-np110py27_0/lib/python2.7/site-packages/pandas --driver-class-path path_to_spark_application --conf spark.yarn.executor.memoryOverhead=3000 iccmovingavgV2_parquet.py ICC/CSV spark
 
 	# spark-submit --master yarn --executor-memory 12G --executor-cores 4 --driver-cores 3 --driver-memory 6G iccmovingavgV3.py ICC/US/INPUT/20170530/ICC_MLC_PROG/CSV 
 
 	#cat /tmp/ICCMovingAvg/iccmovingavg.log | grep Duration
         print "======================================="
-        parser = argparse.ArgumentParser(description='Program to calculate icc moving avergae',usage='example: time spark-submit --master yarn-client iccmovingavgV5.py ICC/US/INPUT/20170530/ICC_MLC_PROG/CSV spark/python --debugmode 0')
+        parser = argparse.ArgumentParser(description='Program to calculate icc moving avergae',usage='example: time spark-submit --master yarn-client iccmovingavgV5.py ICC/CSV spark/python --debugmode 0')
         parser.add_argument('keyDir', help='')
         #parser.add_argument('mode', help=' use this to either run as spark or python')
         #parser.add_argument('-dt','--keyDate', help='')
@@ -237,7 +237,7 @@ def main():
         if args.outDir:
                 args.outDir =""
         else:
-                outDir ="/home/kshanbhag/ICC/results"
+                outDir ="/home//ICC/results"
         if args.samplesize:
                 samplesize = int(args.samplesize)
         else:
@@ -245,8 +245,8 @@ def main():
         if args.combinationsize:
                 combinationsize = int(args.combinationsize)
 	if debugMode == 0:
-		tmpRawData = "/home/kshanbhag/DieLevelRawData"
-		hdfsbasepath = "/user/kshanbhag/MovingAvg"
+		tmpRawData = "/home/**/DieLevelRawData"
+		hdfsbasepath = "/user/**/MovingAvg"
 	else:
 	        tmpRawData = "/tmp/ICCMovingAvg/DieLevelRawData"
 		hdfsbasepath = "/ICCCharacterisation/MovingAvg"
@@ -274,7 +274,7 @@ def main():
         logger.info(">>>> CLEANUP STARTS <<<<")
 	'''
         logger.info(" Remove all the tmp files from all the nodes")
-        command = "python /home/bdingstprd/datahighway/COMMON/python/monitornodes.py --command 'rm -r "+os.path.dirname(tmpRawData)+"/*'  --hostfile /home/bdingstprd/datahighway/DataIngestion/Config/hosts.txt"
+        command = "python/monitornodes.py --command 'rm -r "+os.path.dirname(tmpRawData)+"/*'  --hostfile DataIngestion/Config/hosts.txt"
         #a,b,c = exec_command(command)
         logger.info(" Finished cleaning all the nodes")
 	'''
@@ -304,7 +304,7 @@ def main():
         	b = s3connection(access_key,secret_key,bucket_name)
 	        fileNames = readS3Keys(b,keyDir,debugMode)
 	else:
-		baseDir= "/home/kshanbhag/tmpkshanbhag/CodeNew/movingAvgRDD/"
+		baseDir= "/homeadress/movingAvgRDD/"
 	        fileNames= [baseDir+"file1.csv",baseDir+"file2.csv",baseDir+"file3.csv",baseDir+"file4.csv"]
 	from pyspark import SparkContext, SparkConf
 
