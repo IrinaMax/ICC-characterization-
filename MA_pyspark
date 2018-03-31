@@ -22,7 +22,7 @@ from debugicc import debug1
 #from scipy import signal
 from logging.handlers import RotatingFileHandler
 cmd_path = os.path.realpath(os.path.abspath(os.path.split(inspect.getfile( inspect.currentframe() ))[0]))
-## this is to get path for common directory, assuming code is under datahighway
+## this is to get path for common directory, assuming code is under data**
 filePath = os.path.realpath(__file__)
 rootDir = filePath[0: filePath.find('data**')]
 common_path = os.path.realpath( os.path.join(rootDir,'data**/COMMON/python'))
