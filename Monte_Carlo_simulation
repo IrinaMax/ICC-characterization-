@@ -1,0 +1,55 @@
+# Monte Carlo simulation to compare the CLT to the t-distribution approximation for different sample sizes.
+
+
+library(knitr)
+opts_chunk$set(fig.path=paste0("figure/", sub("(.*).Rmd","\\1",basename(knitr:::knit_concord$get('infile'))), "-"))
+set.seed(1)
+library(rafalib)
+library(downloader)
+url <- "https://raw.githubusercontent.com/genomicsclass/dagdata/master/inst/extdata/mice_pheno.csv"
+filename <- "mice_pheno.csv"
+if (!file.exists(filename)) download(url,destfile=filename)
+library(dplyr)
+dat <- read.csv("mice_pheno.csv")
+controlPopulation <- filter(dat,Sex == "F" & Diet == "chow") %>%  
+  select(Bodyweight) %>% unlist
+ttestgenerator <- function(n) {
+  #note that here we have a false "high fat" group where we actually
+  #sample from the chow or control population. 
+  #This is because we are modeling the null.
+  cases <- sample(controlPopulation,n)
+  controls <- sample(controlPopulation,n)
+  tstat <- (mean(cases)-mean(controls)) / 
+      sqrt( var(cases)/n + var(controls)/n ) 
+  return(tstat)
+  }
+ttests <- replicate(1000, ttestgenerator(10))
+# With 1,000 Monte Carlo simulated occurrences of this random variable, we can now get a glimpse of its distribution:
+
+hist(ttests)
+qqnorm(ttests)
+abline(0,1)
+# QQplot if points fall on the identity line, it means the approximation is a good one.
+
+ttests <- replicate(1000, ttestgenerator(3))
+qqnorm(ttests)
+abline(0,1)
+ps <- (seq(0,999)+0.5)/1000
+qqplot(qt(ps,df=2*3-2),ttests,xlim=c(-6,6),ylim=c(-6,6))
+abline(0,1)
+#The t-distribution is a much better approximation in this case, but it is still not perfect. This is due to the fact that the original data is not that well approximated by the normal distribution.
+
+qqnorm(controlPopulation)
+qqline(controlPopulation)
+
+# Parametric Simulations for the Observations
+controls<- rnorm(5000, mean=24, sd=3.5) 
+#After we generate the data, we can then repeat the exercise above. We no longer have to use the sample function since we can re-generate random normal numbers. The ttestgenerator function therefore can be written as follows:
+
+ttestgenerator <- function(n, mean=24, sd=3.5) {
+  cases <- rnorm(n,mean,sd)
+  controls <- rnorm(n,mean,sd)
+  tstat <- (mean(cases)-mean(controls)) / 
+      sqrt( var(cases)/n + var(controls)/n ) 
+  return(tstat)
+  }
